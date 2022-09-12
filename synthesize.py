@@ -8,6 +8,7 @@ import json
 from string import punctuation
 from g2p_en import G2p
 
+from models.Wav2vec2 import Wav2vec2
 from models.SCCNN import SCCNN
 from text import text_to_sequence
 import audio as Audio
@@ -62,8 +63,13 @@ def preprocess_audio(args, _stft):
     We set default top_db=20 for VCTK dataset.
     '''
     wav, section = librosa.effects.trim(wav, top_db=20)
+    
+    # Wav2vec2.0 feature extraction
+    wav16 = librosa.resample(wav, sample_rate, 16000)
+    wav16 = torch.FloatTensor(wav16).unsqueeze(0)
+
     mel_spectrogram, _ = Audio.tools.get_mel_from_wav(wav, _stft)
-    return torch.from_numpy(mel_spectrogram).to(device=device)
+    return wav16.to(device), torch.from_numpy(mel_spectrogram).to(device=device)
 
 
 def get_SCCNN(config, checkpoint_path):
@@ -76,14 +82,15 @@ def get_SCCNN(config, checkpoint_path):
 def synthesize(args, text, model, _stft):   
     # preprocess audio and text
 
-    ref_mel = preprocess_audio(args, _stft).transpose(0,1).unsqueeze(0)
+    wav16, ref_mel = preprocess_audio(args, _stft).transpose(0,1).unsqueeze(0)
     
     save_path = args.save_path
     if not os.path.exists(save_path):
         os.makedirs(save_path, exist_ok=True)
 
     # Extract style vector
-    style_vector = model.get_style_vector(ref_mel)
+    latent = wav2vec2(wav16)
+    style_vector = model.get_style_vector(latent)
     mel_ref_ = ref_mel.cpu().squeeze().transpose(0, 1).detach()
     np.save(save_path + 'ref_{}.npy'.format(args.ref_audio[-12:-4]), np.array(mel_ref_.unsqueeze(0)))
     
@@ -128,6 +135,8 @@ if __name__ == "__main__":
 
     # Get model
     model = get_SCCNN(config, args.checkpoint_path)
+    wav2vec2 = Wav2vec2().to(device)
+    wav2vec2.eval()
     print('model is prepared')
 
     _stft = Audio.stft.TacotronSTFT(
@@ -149,4 +158,4 @@ if __name__ == "__main__":
     #     # 'People put on their coats, is it cold out there?'
     # ]
     args.sampling_rate = config.sampling_rate
-    synthesize(args, args.text, model, _stft)
+    synthesize(args, args.text, model, wav2vec2, _stft)

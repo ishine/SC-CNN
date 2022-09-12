@@ -18,28 +18,34 @@ class SCCNN(nn.Module):
         self.encoder = Encoder(config)
         self.variance_adaptor = VarianceAdaptor(config)
         self.decoder = Decoder(config)
-        
+        # self.post_latent_encoder = PostLatentEncoder(config)
+
     def parse_batch(self, batch):
-        sid = torch.from_numpy(batch["sid"]).long().cuda()
+        # sid = torch.from_numpy(batch["sid"]).long().cuda()
         text = torch.from_numpy(batch["text"]).long().cuda()
         mel_target = torch.from_numpy(batch["mel_target"]).float().cuda()
+        latent = torch.from_numpy(batch["latent"]).float().cuda()
         D = torch.from_numpy(batch["D"]).long().cuda()
         log_D = torch.from_numpy(batch["log_D"]).float().cuda()
         f0 = torch.from_numpy(batch["f0"]).float().cuda()
         energy = torch.from_numpy(batch["energy"]).float().cuda()
         src_len = torch.from_numpy(batch["src_len"]).long().cuda()
         mel_len = torch.from_numpy(batch["mel_len"]).long().cuda()
+        latent_len = torch.from_numpy(batch["latent_len"]).long().cuda()
         max_src_len = np.max(batch["src_len"]).astype(np.int32)
         max_mel_len = np.max(batch["mel_len"]).astype(np.int32)
-        return sid, text, mel_target, D, log_D, f0, energy, src_len, mel_len, max_src_len, max_mel_len
+        max_latent_len = np.max(batch["latent_len"]).astype(np.int32)
+        return None, text, mel_target, latent, D, log_D, f0, energy, src_len, mel_len, latent_len, \
+            max_src_len, max_mel_len, max_latent_len
 
-    def forward(self, src_seq, src_len, mel_target, mel_len=None, 
-                    d_target=None, p_target=None, e_target=None, max_src_len=None, max_mel_len=None):
+    def forward(self, src_seq, src_len, mel_target, latent, mel_len=None, latent_len=None, 
+                    d_target=None, p_target=None, e_target=None, use_acoustic_enc=None, max_src_len=None, max_mel_len=None, max_latent_len=None):
+
         src_mask = get_mask_from_lengths(src_len, max_src_len)
         mel_mask = get_mask_from_lengths(mel_len, max_mel_len) if mel_len is not None else None
-        
+        latent_mask = get_mask_from_lengths(latent_len, max_latent_len) if latent_len is not None else None 
         # Extract Style Vector
-        style_vector = self.style_encoder(mel_target, mel_mask)
+        style_vector = self.style_encoder(latent, latent_mask)
         # Encoding
         encoder_output, src_embedded, _ = self.encoder(src_seq, style_vector, src_mask)
         # Variance Adaptor
@@ -51,16 +57,11 @@ class SCCNN(nn.Module):
 
         return mel_prediction, src_embedded, style_vector, d_prediction, p_prediction, e_prediction, src_mask, mel_mask, mel_len
 
-    def inference(self, style_vector, src_seq, src_len=None, max_src_len=None, return_attn=False, return_kernel=False):
+    def inference(self, style_vector, src_seq, src_len=None, max_src_len=None, return_attn=False):
         src_mask = get_mask_from_lengths(src_len, max_src_len)
         
         # Encoding
-        if return_kernel:
-            kernel_params = self.encoder(src_seq, style_vector, src_mask, True)
-            return kernel_params
-        
         encoder_output, src_embedded, enc_slf_attn = self.encoder(src_seq, style_vector, src_mask)
-
 
         # Variance Adaptor
         acoustic_adaptor_output, d_prediction, p_prediction, e_prediction, \
@@ -74,14 +75,15 @@ class SCCNN(nn.Module):
 
         return mel_output, src_embedded, d_prediction, p_prediction, e_prediction, src_mask, mel_mask, mel_len
 
-    def get_style_vector(self, mel_target, mel_len=None):
-        mel_mask = get_mask_from_lengths(mel_len) if mel_len is not None else None
-        style_vector = self.style_encoder(mel_target, mel_mask)
+    def get_style_vector(self, latent, latent_len = None):
+        latent_mask = get_mask_from_lengths(latent_len) if latent_len is not None else None
+        style_vector = self.style_encoder(latent, latent_mask)
 
         return style_vector
 
     def get_criterion(self):
         return StyleSpeechLoss()
+
 
 
 class Encoder(nn.Module):
@@ -351,7 +353,7 @@ class MelStyleEncoder(nn.Module):
     ''' MelStyleEncoder '''
     def __init__(self, config):
         super(MelStyleEncoder, self).__init__()
-        self.in_dim = config.n_mel_channels 
+        self.in_dim = 768 #! for latent vector
         self.hidden_dim = config.style_hidden
         self.out_dim = config.style_vector_dim
         self.kernel_size = config.style_kernel_size

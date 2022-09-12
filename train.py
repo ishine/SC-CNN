@@ -70,7 +70,7 @@ def main(args, c):
 
     # Training
     model.train()
-    while current_step < args.max_iter:        
+        while current_step < args.max_iter:        
         # Get Training Loader
         for idx, batch in enumerate(data_loader):
 
@@ -78,13 +78,15 @@ def main(args, c):
                 break
                 
             # Get Data
-            sid, text, mel_target, D, log_D, f0, energy, \
-                    src_len, mel_len, max_src_len, max_mel_len = model.parse_batch(batch)
+            sid, text, mel_target, latent, D, log_D, f0, energy, \
+                    src_len, mel_len, latent_len, \
+                        max_src_len, max_mel_len, max_latent_len = model.parse_batch(batch)
                 
             # Forward
             scheduled_optim.zero_grad()
             mel_output, src_output, style_vector, log_duration_output, f0_output, energy_output, src_mask, mel_mask, _  = model(
-                    text, src_len, mel_target, mel_len, D, f0, energy, max_src_len, max_mel_len)
+                    text, src_len, mel_target, latent, mel_len, latent_len, \
+                        D, f0, energy, True, max_src_len, max_mel_len, max_latent_len)
 
             mel_loss, d_loss, f_loss, e_loss = Loss(mel_output, mel_target, 
                     log_duration_output, log_D, f0_output, f0, energy_output, energy, src_len, mel_len)
